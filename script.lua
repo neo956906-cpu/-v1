@@ -243,10 +243,11 @@ for _, p in pairs(Players:GetPlayers()) do
 end
 
 -- ==========================================
--- [완벽한 총알 벽 관통 (Wallbang) 시스템]
+-- [초강력 스트리밍 대응 총알 관통 (Wallbang) 시스템]
 -- ==========================================
 local wallbangOriginals = {}
 local wallbangConnection
+local streamLoopConnection
 local oldRaycast
 
 local function processWallbangPart(part)
@@ -256,6 +257,7 @@ local function processWallbangPart(part)
 		end
 		
 		local partName = string.lower(part.Name)
+		-- 바닥이나 스폰 구역은 빠져나가지 않도록 보호
 		if part:IsA("Terrain") or partName:match("baseplate") or partName:match("spawn") then 
 			return 
 		end
@@ -271,12 +273,12 @@ local function processWallbangPart(part)
 		
 		part.CanCollide = false
 		part.CanTouch = false
-		pcall(function() part.CanQuery = false end)
+		pcall(function() part.CanQuery = false end) -- 레이캐스트 감지 원천 차단
 		part.Transparency = math.max(part.Transparency, 0.7)
 	end
 end
 
--- 총기 레이캐스트를 가로채서 벽을 완전히 무시하도록 후킹
+-- 레이캐스트 후킹
 pcall(function()
 	oldRaycast = hookfunction(workspace.Raycast, newcclosure(function(self, origin, direction, params)
 		if isWallbang and self == workspace then
@@ -301,13 +303,27 @@ pcall(function()
 end)
 
 local function enableWallbang()
+	-- 1. 기존 파트 적용
 	for _, part in pairs(workspace:GetDescendants()) do
 		processWallbangPart(part)
 	end
 	
+	-- 2. 새로 추가되는 파트 실시간 적용
 	wallbangConnection = workspace.DescendantAdded:Connect(function(part)
 		task.wait(0.05)
 		if isWallbang then processWallbangPart(part) end
+	end)
+	
+	-- 3. 스트리밍 등으로 늦게 생기는 오브젝트들을 주기적으로 스캔하여 강제 관통 처리
+	streamLoopConnection = task.spawn(function()
+		while isWallbang do
+			task.wait(0.5)
+			for _, part in pairs(workspace:GetDescendants()) do
+				if isWallbang and part:IsA("BasePart") then
+					processWallbangPart(part)
+				end
+			end
+		end
 	end)
 end
 
