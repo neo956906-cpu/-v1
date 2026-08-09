@@ -14,10 +14,10 @@ raycastParams.IgnoreWater = true
 
 
 -- ==========================================
--- 2. GUI 생성 (Gemini V1)
+-- 2. GUI 생성 (Gemini V2)
 -- ==========================================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "GeminiV1Gui"
+screenGui.Name = "GeminiV2Gui"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.Parent = player:WaitForChild("PlayerGui")
@@ -43,7 +43,7 @@ corner.Parent = fovCircle
 local toggleMenuBtn = Instance.new("TextButton")
 toggleMenuBtn.Size = UDim2.new(0, 120, 0, 50)
 toggleMenuBtn.Position = UDim2.new(0, 20, 0, 20)
-toggleMenuBtn.Text = "Gemini V1"
+toggleMenuBtn.Text = "Gemini V2"
 toggleMenuBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 toggleMenuBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleMenuBtn.Font = Enum.Font.GothamBold
@@ -144,7 +144,7 @@ end
 toggleMenuBtn.MouseButton1Click:Connect(function()
 	menuOpen = not menuOpen
 	mainFrame.Visible = menuOpen
-	toggleMenuBtn.Text = menuOpen and "Gemini V1 (Close)" or "Gemini V1"
+	toggleMenuBtn.Text = menuOpen and "Gemini V2 (Close)" or "Gemini V2"
 end)
 
 speedInput.FocusLost:Connect(function()
@@ -243,26 +243,23 @@ for _, p in pairs(Players:GetPlayers()) do
 end
 
 -- ==========================================
--- [개선된 두꺼운 벽 관통 (Wallbang) 시스템]
+-- [완벽한 총알 벽 관통 (Wallbang) 시스템]
 -- ==========================================
 local wallbangOriginals = {}
 local wallbangConnection
-local runServiceConnection
+local oldRaycast
 
 local function processWallbangPart(part)
 	if part:IsA("BasePart") then
-		-- 플레이어 캐릭터 무시 (적 타격 레이캐스트 유지를 위해)
 		for _, p in pairs(Players:GetPlayers()) do
 			if p.Character and part:IsDescendantOf(p.Character) then return end
 		end
 		
-		-- 지형 및 베이스플레이트 무시 (바닥 낙하 방지)
 		local partName = string.lower(part.Name)
 		if part:IsA("Terrain") or partName:match("baseplate") or partName:match("spawn") then 
 			return 
 		end
 		
-		-- 원본 상태 저장
 		if not wallbangOriginals[part] then
 			wallbangOriginals[part] = {
 				CanCollide = part.CanCollide,
@@ -272,7 +269,6 @@ local function processWallbangPart(part)
 			}
 		end
 		
-		-- 물리, 레이캐스트, 터치 감지 무력화
 		part.CanCollide = false
 		part.CanTouch = false
 		pcall(function() part.CanQuery = false end)
@@ -280,49 +276,44 @@ local function processWallbangPart(part)
 	end
 end
 
-local function updateRaycastFilter()
-	-- 총기 스크립트가 로컬 RaycastParams를 참조할 때 해당 파트들을 완전히 무시하도록 Exclude 테이블 업데이트
-	local ignoreList = {}
-	for part, _ in pairs(wallbangOriginals) do
-		if part and part.Parent then
-			table.insert(ignoreList, part)
+-- 총기 레이캐스트를 가로채서 벽을 완전히 무시하도록 후킹
+pcall(function()
+	oldRaycast = hookfunction(workspace.Raycast, newcclosure(function(self, origin, direction, params)
+		if isWallbang and self == workspace then
+			if not params then
+				params = RaycastParams.new()
+				params.FilterType = Enum.RaycastFilterType.Exclude
+			end
+			local currentFilter = params.FilterDescendantsInstances or {}
+			local newFilter = {}
+			for _, v in ipairs(currentFilter) do
+				table.insert(newFilter, v)
+			end
+			for part, _ in pairs(wallbangOriginals) do
+				if part and part.Parent then
+					table.insert(newFilter, part)
+				end
+			end
+			params.FilterDescendantsInstances = newFilter
 		end
-	end
-	raycastParams.FilterDescendantsInstances = ignoreList
-end
+		return oldRaycast(self, origin, direction, params)
+	end))
+end)
 
 local function enableWallbang()
-	-- 1. 맵 전체 파트 적용
 	for _, part in pairs(workspace:GetDescendants()) do
 		processWallbangPart(part)
 	end
 	
-	-- 2. 신규 파트 실시간 적용
 	wallbangConnection = workspace.DescendantAdded:Connect(function(part)
 		task.wait(0.05)
 		if isWallbang then processWallbangPart(part) end
-	end)
-
-	-- 3. 총기 스크립트(KicksV3/ACS 등)가 벽 속성을 원복하는 것을 프레임마다 강제 차단 (두꺼운 벽 관통 핵심)
-	runServiceConnection = RunService.RenderStepped:Connect(function()
-		if isWallbang then
-			for part, _ in pairs(wallbangOriginals) do
-				if part and part.Parent then
-					part.CanCollide = false
-					part.CanTouch = false
-					pcall(function() part.CanQuery = false end)
-				end
-			end
-			updateRaycastFilter()
-		end
 	end)
 end
 
 local function disableWallbang()
 	if wallbangConnection then wallbangConnection:Disconnect() end
-	if runServiceConnection then runServiceConnection:Disconnect() end
 	
-	-- 원래 상태 복구
 	for part, props in pairs(wallbangOriginals) do
 		if part and part.Parent then
 			part.CanCollide = props.CanCollide
@@ -334,7 +325,6 @@ local function disableWallbang()
 		end
 	end
 	wallbangOriginals = {}
-	raycastParams.FilterDescendantsInstances = {}
 end
 
 wallbangBtn.MouseButton1Click:Connect(function()
